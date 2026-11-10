@@ -1,0 +1,761 @@
+<!doctype html>
+<html lang="ka">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>ტასკების დაფა</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Noto+Sans+Georgian:wght@400;500;600;700&display=swap">
+<style>
+/* Layout: header with progress and account, add/edit form, search + assignee filters, five-column kanban (scrolls sideways below 1100px, stacks below 640px). */
+:root {
+  --sans: "Noto Sans Georgian", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --bg: #F1F4F2;
+  --surface: #FFFFFF;
+  --col: #E6ECE9;
+  --ink: #17211E;
+  --muted: #55625C;
+  --line: #D3DCD8;
+  --accent: #1D6F57;
+  --accent-ink: #FFFFFF;
+  --danger: #B3261E;
+  --warn: #8F5A00;
+  --s-backlog: #7A8681;
+  --s-todo: #2F6DB5;
+  --s-progress: #A8690D;
+  --s-review: #7A52B3;
+  --s-done: #1D7A57;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #101614;
+    --surface: #18211E;
+    --col: #141C19;
+    --ink: #E7EEEB;
+    --muted: #9AA8A2;
+    --line: #2B3834;
+    --accent: #3FBF93;
+    --accent-ink: #06150F;
+    --danger: #F2867F;
+    --warn: #E8B45A;
+    --s-backlog: #8E9B96;
+    --s-todo: #6FA6E8;
+    --s-progress: #E0A93F;
+    --s-review: #B196E6;
+    --s-done: #4CC79A;
+    color-scheme: dark;
+  }
+}
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 14px;
+  line-height: 1.45;
+  padding-block: max(20px, env(safe-area-inset-top, 0px)) max(20px, env(safe-area-inset-bottom, 0px));
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+.wrap { max-width: 1360px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+.stack { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.stack.tight { gap: 8px; }
+h1, h2, h3, h4, p { margin: 0; }
+button, input, select, textarea { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* header */
+.top { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; }
+.top h1 { font-size: 24px; font-weight: 700; letter-spacing: -0.01em; text-wrap: balance; }
+.account { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); min-width: 0; }
+.account .who-me { overflow-wrap: anywhere; }
+
+/* summary */
+.summary { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 10px; }
+.summary .big { font-family: var(--mono); font-size: 22px; font-weight: 500; font-variant-numeric: tabular-nums; }
+.summary .lbl { color: var(--muted); }
+.summary .pct { font-family: var(--mono); color: var(--muted); font-variant-numeric: tabular-nums; }
+.summary .late-count { font-size: 12px; color: var(--danger); font-weight: 500; }
+.bar { display: flex; height: 10px; border-radius: 5px; overflow: hidden; background: var(--col); border: 1px solid var(--line); }
+.bar .seg { flex-basis: 0; min-width: 4px; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; color: var(--muted); font-size: 12px; }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.legend i, .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; flex: none; }
+.legend b { font-family: var(--mono); font-weight: 500; color: var(--ink); font-variant-numeric: tabular-nums; }
+
+/* notes */
+.note { padding: 9px 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface); color: var(--muted); }
+.note.err { border-color: var(--danger); color: var(--danger); }
+
+/* gate (sign-in / setup / no access) */
+.gate { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 24px 20px; display: flex; flex-direction: column; gap: 12px; max-width: 520px; }
+.gate h2 { font-size: 18px; font-weight: 600; }
+.gate p { color: var(--muted); max-width: 60ch; }
+.gate code { font-family: var(--mono); font-size: 12px; background: var(--col); padding: 1px 5px; border-radius: 4px; overflow-wrap: anywhere; }
+
+/* form */
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px; display: flex; flex-direction: column; gap: 12px; }
+.panel fieldset { border: 0; padding: 0; margin: 0; min-width: 0; display: flex; flex-direction: column; gap: 12px; }
+.panel h2 { font-size: 14px; font-weight: 600; }
+.fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+.fields label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); min-width: 0; }
+.fields .wide { grid-column: span 2; }
+.fields .full { grid-column: 1 / -1; }
+.fields input, .fields select, .fields textarea {
+  width: 100%; min-width: 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px;
+  background: var(--bg); color: var(--ink); font-size: 14px;
+}
+.fields textarea { resize: vertical; min-height: 38px; }
+.actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.actions .kbd { color: var(--muted); font-size: 12px; }
+.btn { padding: 8px 16px; border-radius: 6px; border: 1px solid var(--line); background: transparent; cursor: pointer; font-weight: 500; }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
+.btn.small { padding: 4px 10px; font-size: 12px; }
+.btn:disabled { opacity: .5; cursor: not-allowed; }
+
+/* filters */
+.tools { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; }
+.search { flex: 0 1 260px; min-width: 0; padding: 6px 10px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); color: var(--ink); font-size: 13px; }
+.filters { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; min-width: 0; }
+.filters .cap { color: var(--muted); font-size: 12px; margin-right: 4px; }
+.chip { padding: 4px 11px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface); cursor: pointer; font-size: 13px; }
+.chip .c { font-family: var(--mono); font-size: 11px; color: var(--muted); margin-left: 4px; font-variant-numeric: tabular-nums; }
+.chip[aria-pressed="true"] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+.chip[aria-pressed="true"] .c { color: var(--bg); }
+
+/* board */
+.board { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; align-items: start; }
+.col { background: var(--col); border-radius: 10px; padding: 10px; display: flex; flex-direction: column; gap: 10px; min-width: 0; border: 2px solid transparent; }
+.col.over { border: 2px dashed var(--accent); }
+.col-head { display: flex; align-items: center; gap: 8px; padding: 2px 2px 0; }
+.col-head h3 { font-size: 13px; font-weight: 600; }
+.col-head .n { margin-left: auto; font-family: var(--mono); font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.col-body { display: flex; flex-direction: column; gap: 8px; min-height: 40px; }
+.empty { color: var(--muted); font-size: 12px; padding: 6px 2px; }
+
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.card[draggable="true"] { cursor: grab; }
+.card.dragging { opacity: .45; }
+.card.editing { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.card-title { font-size: 14px; font-weight: 500; overflow-wrap: anywhere; }
+.card.is-done .card-title { color: var(--muted); text-decoration: line-through; text-decoration-thickness: 1px; }
+.card-desc { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; white-space: pre-line; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.meta { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 12px; color: var(--muted); }
+.pill { font-size: 11px; padding: 1px 7px; border-radius: 999px; border: 1px solid currentColor; font-weight: 500; }
+.p-high { color: var(--danger); }
+.p-mid { color: var(--s-progress); }
+.p-low { color: var(--muted); }
+.due { font-family: var(--mono); font-size: 11px; font-variant-numeric: tabular-nums; }
+.due.soon { color: var(--warn); font-weight: 500; }
+.due.late { color: var(--danger); font-weight: 500; }
+.who { display: inline-flex; align-items: center; gap: 5px; color: var(--ink); min-width: 0; }
+.who .av { width: 18px; height: 18px; border-radius: 50%; background: var(--col); border: 1px solid var(--line); display: inline-flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 600; flex: none; }
+.who .nm { overflow-wrap: anywhere; }
+.card-actions { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.mini { padding: 3px 8px; font-size: 12px; border: 1px solid var(--line); background: transparent; border-radius: 5px; cursor: pointer; }
+.mini:disabled { opacity: .4; cursor: not-allowed; }
+.mini.danger { color: var(--danger); }
+.card-actions .sp { flex: 1; }
+.ask { font-size: 12px; color: var(--danger); margin-left: 4px; }
+
+@media (max-width: 1099px) {
+  .board { grid-template-columns: repeat(5, minmax(240px, 1fr)); overflow-x: auto; scroll-snap-type: x proximity; padding-bottom: 8px; }
+  .col { scroll-snap-align: start; }
+}
+@media (max-width: 640px) {
+  .board { grid-template-columns: 1fr; overflow: visible; }
+  .fields .wide { grid-column: auto; }
+  .search { flex: 1 1 100%; }
+  .mini { padding: 6px 10px; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .btn, .mini, .chip { transition: background-color .12s, border-color .12s; }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <h1>ტასკების დაფა</h1>
+    <div class="account" id="account" hidden>
+      <span class="who-me" id="me"></span>
+      <button class="btn small" type="button" id="signOut">გასვლა</button>
+    </div>
+  </header>
+
+  <p class="note" id="note" role="status" hidden></p>
+
+  <!-- shown until the person is signed in and allowed -->
+  <section class="gate" id="gate">
+    <h2 id="gateTitle">იტვირთება…</h2>
+    <p id="gateText"></p>
+    <div class="actions">
+      <button class="btn primary" type="button" id="signIn" hidden>Google-ით შესვლა</button>
+      <button class="btn" type="button" id="gateOut" hidden>სხვა ანგარიშით შესვლა</button>
+    </div>
+  </section>
+
+  <div id="app" hidden>
+    <div class="stack">
+      <section aria-label="პროგრესი" class="stack tight">
+        <div class="summary">
+          <span class="big" id="count">0</span>
+          <span class="lbl">დასრულებულია</span>
+          <span class="pct" id="pct">—</span>
+          <span class="late-count" id="lateCount" hidden></span>
+        </div>
+        <div class="bar" id="bar" role="img" aria-label="პროგრესი"></div>
+        <div class="legend" id="legend"></div>
+      </section>
+
+      <form class="panel" id="f" autocomplete="off">
+        <fieldset id="fset">
+          <h2 id="fTitle">ახალი ტასკი</h2>
+          <div class="fields">
+            <label class="wide" for="fName">დასახელება
+              <input id="fName" required maxlength="140" placeholder="მაგ. შესვლის გვერდის შემოწმება">
+            </label>
+            <label for="fWho">პასუხისმგებელი
+              <input id="fWho" list="whoList" maxlength="40" placeholder="სახელი">
+            </label>
+            <label for="fDue">ვადა
+              <input id="fDue" type="date">
+            </label>
+            <label for="fPrio">პრიორიტეტი
+              <select id="fPrio">
+                <option value="mid">საშუალო</option>
+                <option value="high">მაღალი</option>
+                <option value="low">დაბალი</option>
+              </select>
+            </label>
+            <label for="fStatus">სტატუსი
+              <select id="fStatus"></select>
+            </label>
+            <label class="full" for="fDesc">აღწერა (არასავალდებულო)
+              <textarea id="fDesc" rows="2" maxlength="1000" placeholder="დეტალები, ბმული ან შენიშვნა"></textarea>
+            </label>
+          </div>
+          <div class="actions">
+            <button class="btn primary" type="submit" id="fSubmit">დამატება</button>
+            <button class="btn" type="button" id="fCancel" hidden>გაუქმება</button>
+            <span class="kbd" id="fKbd" hidden>Esc — გაუქმება</span>
+          </div>
+        </fieldset>
+        <datalist id="whoList"></datalist>
+      </form>
+
+      <div class="tools">
+        <input class="search" id="q" type="search" placeholder="ძიება დასახელებით…" aria-label="ტასკების ძიება">
+        <div class="filters" id="filters" hidden></div>
+      </div>
+
+      <p class="note" id="hint" hidden>ჯერ ტასკი არ არის. ზემოთ ჩაწერე პირველის დასახელება, მიუთითე პასუხისმგებელი და დააჭირე „დამატება“.</p>
+
+      <div class="board" id="board"></div>
+    </div>
+  </div>
+</div>
+
+<script type="module">
+/* ================================================================
+   1) ჩასვი აქ შენი Firebase პროექტის კონფიგურაცია
+      (Firebase Console → Project settings → Your apps → Web app → Config).
+      ეს მნიშვნელობები საიდუმლო არ არის; დაცვას უზრუნველყოფს
+      firestore.rules ფაილში მითითებული email-ების სია.
+   ================================================================ */
+const FIREBASE_CONFIG = {
+  apiKey: "AIzaSyCEILUrs-Me6AtiyypXtbgTMV5onHNntmc",
+  authDomain: "tasks-board-245ef.firebaseapp.com",
+  projectId: "tasks-board-245ef",
+  storageBucket: "tasks-board-245ef.firebasestorage.app",
+  messagingSenderId: "544085577034",
+  appId: "1:544085577034:web:84bef8a7ff915730a505b3"
+};
+
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import {
+  getAuth, GoogleAuthProvider, onAuthStateChanged, signInWithPopup, signOut
+} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import {
+  getFirestore, collection, doc, addDoc, updateDoc, deleteDoc, onSnapshot
+} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+const STATUSES = [
+  { id: 'backlog', label: 'Backlog' },
+  { id: 'todo', label: 'გასაკეთებელი' },
+  { id: 'progress', label: 'მიმდინარე' },
+  { id: 'review', label: 'შემოწმება' },
+  { id: 'done', label: 'დასრულებული' }
+];
+const PRIO = { high: 'მაღალი', mid: 'საშუალო', low: 'დაბალი' };
+const PRANK = { high: 0, mid: 1, low: 2 };
+const MONTHS = ['იან', 'თებ', 'მარ', 'აპრ', 'მაი', 'ივნ', 'ივლ', 'აგვ', 'სექ', 'ოქტ', 'ნოე', 'დეკ'];
+const FIELDS = ['title', 'assignee', 'due', 'priority', 'status', 'desc'];
+
+let tasks = [];
+let fs = null, auth = null, tasksCol = null, unsub = null;
+let loaded = false;
+let filter = '', query = '', editingId = null, editOrig = null, confirmDel = null;
+let noteTimer = null;
+const chains = {};
+
+const $ = (id) => document.getElementById(id);
+function el(tag, cls, text) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text != null) e.textContent = text;
+  return e;
+}
+const str = (v) => typeof v === 'string' ? v : (v == null ? '' : String(v));
+const statusIndex = (id) => STATUSES.findIndex((s) => s.id === id);
+function ymd(d) {
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+const todayStr = () => ymd(new Date());
+function plusDays(n) { const d = new Date(); d.setDate(d.getDate() + n); return ymd(d); }
+const validDue = (s) => /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : '';
+function fmtDue(s) {
+  const p = s.split('-').map(Number);
+  let out = p[2] + ' ' + MONTHS[p[1] - 1];
+  if (p[0] !== new Date().getFullYear()) out += ' ' + p[0];
+  return out;
+}
+const byId = (id) => tasks.find((t) => t.id === id) || null;
+
+function normalize(id, o) {
+  o = o || {};
+  const st = str(o.status), pr = str(o.priority);
+  return {
+    id,
+    title: str(o.title).slice(0, 140),
+    assignee: str(o.assignee).trim().slice(0, 40),
+    due: validDue(str(o.due)),
+    priority: PRANK[pr] != null ? pr : 'mid',
+    status: statusIndex(st) >= 0 ? st : 'todo',
+    desc: str(o.desc).slice(0, 1000),
+    createdAt: typeof o.createdAt === 'number' ? o.createdAt : 0,
+    updatedAt: typeof o.updatedAt === 'number' ? o.updatedAt : 0
+  };
+}
+
+/* ---------- notes ---------- */
+function showNote(text, isErr) {
+  const n = $('note');
+  n.textContent = text || '';
+  n.hidden = !text;
+  n.classList.toggle('err', !!isErr);
+}
+function flashError(text) {
+  showNote(text, true);
+  clearTimeout(noteTimer);
+  noteTimer = setTimeout(() => showNote('', false), 6000);
+}
+function errText(e) {
+  const c = e && e.code;
+  if (c === 'permission-denied') return 'ცვლილება უარყოფილია: შენს ანგარიშს ამ დაფის შეცვლის უფლება არ აქვს.';
+  if (c === 'not-found') return 'ტასკი ვეღარ მოიძებნა. შესაძლოა სხვამ წაშალა.';
+  if (c === 'resource-exhausted') return 'უფასო დღიური ლიმიტი ამოიწურა. ცვლილებები ხვალ ისევ იმუშავებს.';
+  if (c === 'unauthenticated') return 'სესიას ვადა გაუვიდა. შედი თავიდან.';
+  return 'ცვლილება ვერ შეინახა. შეამოწმე ინტერნეტი და სცადე თავიდან.';
+}
+
+/* ---------- gate ---------- */
+function showGate(title, text, opts) {
+  opts = opts || {};
+  $('gate').hidden = false;
+  $('app').hidden = true;
+  $('gateTitle').textContent = title;
+  const gt = $('gateText');
+  gt.textContent = '';
+  if (Array.isArray(text)) text.forEach((part) => gt.appendChild(typeof part === 'string' ? document.createTextNode(part) : part));
+  else gt.textContent = text || '';
+  $('signIn').hidden = !opts.signIn;
+  $('gateOut').hidden = !opts.signOut;
+}
+function showApp() {
+  $('gate').hidden = true;
+  $('app').hidden = false;
+}
+
+/* ---------- writes: one at a time per document ---------- */
+function run(id, fn) {
+  const prev = chains[id] || Promise.resolve();
+  const p = prev.then(fn).catch((e) => flashError(errText(e)));
+  chains[id] = p;
+  return p;
+}
+function setStatus(id, status) {
+  const t = byId(id);
+  if (!t || t.status === status) return;
+  run(id, () => updateDoc(doc(fs, 'tasks', id), { status, updatedAt: Date.now() }));
+}
+function removeTask(id) {
+  confirmDel = null;
+  if (editingId === id) resetForm();
+  run(id, () => deleteDoc(doc(fs, 'tasks', id)));
+  render();
+}
+
+/* ---------- form ---------- */
+function fillStatusOptions() {
+  const s = $('fStatus');
+  STATUSES.forEach((st) => { const o = el('option', null, st.label); o.value = st.id; s.appendChild(o); });
+  s.value = 'todo';
+}
+function resetForm() {
+  editingId = null;
+  editOrig = null;
+  $('f').reset();
+  $('fStatus').value = 'todo';
+  $('fPrio').value = 'mid';
+  $('fTitle').textContent = 'ახალი ტასკი';
+  $('fSubmit').textContent = 'დამატება';
+  $('fCancel').hidden = true;
+  $('fKbd').hidden = true;
+}
+function startEdit(t) {
+  editingId = t.id;
+  editOrig = {};
+  FIELDS.forEach((k) => { editOrig[k] = t[k]; });
+  $('fName').value = t.title;
+  $('fWho').value = t.assignee;
+  $('fDue').value = t.due;
+  $('fPrio').value = t.priority;
+  $('fStatus').value = t.status;
+  $('fDesc').value = t.desc;
+  $('fTitle').textContent = 'ტასკის შეცვლა';
+  $('fSubmit').textContent = 'შენახვა';
+  $('fCancel').hidden = false;
+  $('fKbd').hidden = false;
+  $('f').scrollIntoView({ block: 'nearest' });
+  $('fName').focus();
+  render();
+}
+function readForm() {
+  return {
+    title: $('fName').value.trim(),
+    assignee: $('fWho').value.trim(),
+    due: $('fDue').value || '',
+    priority: $('fPrio').value,
+    status: $('fStatus').value,
+    desc: $('fDesc').value.trim()
+  };
+}
+$('f').addEventListener('submit', (e) => {
+  e.preventDefault();
+  if (!tasksCol) return;
+  const data = readForm();
+  if (!data.title) return;
+  if (editingId) {
+    // only the fields this person changed, so a teammate's parallel move is kept
+    const id = editingId, patch = {};
+    FIELDS.forEach((k) => { if (data[k] !== editOrig[k]) patch[k] = data[k]; });
+    if (Object.keys(patch).length) {
+      patch.updatedAt = Date.now();
+      run(id, () => updateDoc(doc(fs, 'tasks', id), patch));
+    }
+  } else {
+    data.createdAt = Date.now();
+    data.updatedAt = data.createdAt;
+    addDoc(tasksCol, data).catch((err) => flashError(errText(err)));
+  }
+  resetForm();
+  render();
+});
+$('fCancel').addEventListener('click', () => { resetForm(); render(); });
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  if (confirmDel) { confirmDel = null; render(); return; }
+  if (editingId) { resetForm(); render(); }
+});
+$('q').addEventListener('input', function () { query = this.value.trim().toLowerCase(); renderBoard(); });
+
+/* ---------- rendering ---------- */
+const isLate = (t) => t.status !== 'done' && t.due && t.due < todayStr();
+
+function renderStats() {
+  const total = tasks.length;
+  const done = tasks.filter((t) => t.status === 'done').length;
+  const late = tasks.filter(isLate).length;
+  $('count').textContent = total ? done + ' / ' + total : '0';
+  $('pct').textContent = total ? Math.round(done / total * 100) + '%' : '—';
+  $('lateCount').hidden = !late;
+  $('lateCount').textContent = late ? 'ვადაგასული: ' + late : '';
+
+  const bar = $('bar'), legend = $('legend'), parts = [];
+  bar.textContent = '';
+  legend.textContent = '';
+  STATUSES.slice().reverse().forEach((s) => {
+    const n = tasks.filter((t) => t.status === s.id).length;
+    if (n) {
+      const seg = el('span', 'seg');
+      seg.style.flexGrow = n;
+      seg.style.background = 'var(--s-' + s.id + ')';
+      bar.appendChild(seg);
+    }
+  });
+  STATUSES.forEach((s) => {
+    const n = tasks.filter((t) => t.status === s.id).length;
+    const item = el('span'), dot = el('i');
+    dot.style.background = 'var(--s-' + s.id + ')';
+    item.appendChild(dot);
+    item.appendChild(document.createTextNode(s.label + ' '));
+    item.appendChild(el('b', null, String(n)));
+    legend.appendChild(item);
+    parts.push(s.label + ' ' + n);
+  });
+  bar.setAttribute('aria-label', 'პროგრესი: ' + parts.join(', '));
+}
+
+function assignees() {
+  const open = {}, names = [];
+  tasks.forEach((t) => {
+    if (!t.assignee) return;
+    if (open[t.assignee] == null) { open[t.assignee] = 0; names.push(t.assignee); }
+    if (t.status !== 'done') open[t.assignee]++;
+  });
+  names.sort((a, b) => a.localeCompare(b));
+  return { names, open };
+}
+
+function renderFilters() {
+  const { names, open } = assignees();
+  if (filter && names.indexOf(filter) < 0) filter = '';
+  const dl = $('whoList');
+  dl.textContent = '';
+  names.forEach((n) => { const o = el('option'); o.value = n; dl.appendChild(o); });
+
+  const box = $('filters');
+  box.textContent = '';
+  box.hidden = names.length === 0;
+  if (!names.length) return;
+  box.appendChild(el('span', 'cap', 'ვის აქვს:'));
+  const chip = (label, value, count) => {
+    const b = el('button', 'chip', label);
+    b.type = 'button';
+    if (count != null) { b.appendChild(el('span', 'c', String(count))); b.title = 'დაუსრულებელი ტასკი: ' + count; }
+    b.setAttribute('aria-pressed', filter === value ? 'true' : 'false');
+    b.addEventListener('click', () => { filter = value; render(); });
+    box.appendChild(b);
+  };
+  chip('ყველა', '');
+  names.forEach((n) => chip(n, n, open[n]));
+}
+
+function mini(label, aria, onClick, disabled, cls) {
+  const b = el('button', 'mini' + (cls ? ' ' + cls : ''), label);
+  b.type = 'button';
+  if (aria) { b.setAttribute('aria-label', aria); b.title = aria; }
+  b.disabled = !!disabled;
+  b.addEventListener('click', onClick);
+  return b;
+}
+
+function card(t) {
+  const idx = statusIndex(t.status);
+  const c = el('article', 'card' + (t.status === 'done' ? ' is-done' : '') + (editingId === t.id ? ' editing' : ''));
+  c.dataset.id = t.id;
+  c.draggable = true;
+  c.addEventListener('dragstart', (e) => {
+    e.dataTransfer.setData('text/plain', t.id);
+    e.dataTransfer.effectAllowed = 'move';
+    c.classList.add('dragging');
+  });
+  c.addEventListener('dragend', () => c.classList.remove('dragging'));
+
+  c.appendChild(el('h4', 'card-title', t.title || '(უსათაურო)'));
+  if (t.desc) c.appendChild(el('p', 'card-desc', t.desc));
+
+  const meta = el('div', 'meta');
+  meta.appendChild(el('span', 'pill p-' + t.priority, PRIO[t.priority]));
+  if (t.due) {
+    const late = isLate(t);
+    const soon = !late && t.status !== 'done' && t.due <= plusDays(1);
+    let label = 'ვადა ' + fmtDue(t.due);
+    if (late) label += ' (გასულია)';
+    else if (soon) label += t.due === todayStr() ? ' (დღეს)' : ' (ხვალ)';
+    meta.appendChild(el('span', 'due' + (late ? ' late' : soon ? ' soon' : ''), label));
+  }
+  if (t.assignee) {
+    const w = el('span', 'who');
+    w.appendChild(el('span', 'av', Array.from(t.assignee)[0].toUpperCase()));
+    w.appendChild(el('span', 'nm', t.assignee));
+    meta.appendChild(w);
+  }
+  c.appendChild(meta);
+
+  const act = el('div', 'card-actions');
+  if (confirmDel === t.id) {
+    act.appendChild(el('span', 'ask', 'წაშლა?'));
+    act.appendChild(mini('დიახ', 'ტასკის წაშლა', () => removeTask(t.id), false, 'danger'));
+    act.appendChild(mini('არა', 'გაუქმება', () => { confirmDel = null; render(); }, false));
+  } else {
+    const prev = STATUSES[idx - 1], next = STATUSES[idx + 1];
+    act.appendChild(mini('←', prev ? 'გადატანა: ' + prev.label : 'პირველი სვეტია', () => setStatus(t.id, prev.id), !prev));
+    act.appendChild(mini('→', next ? 'გადატანა: ' + next.label : 'ბოლო სვეტია', () => setStatus(t.id, next.id), !next));
+    act.appendChild(el('span', 'sp'));
+    act.appendChild(mini('შეცვლა', 'ტასკის შეცვლა', () => startEdit(t), false));
+    act.appendChild(mini('წაშლა', 'ტასკის წაშლა', () => { confirmDel = t.id; render(); }, false, 'danger'));
+  }
+  c.appendChild(act);
+  return c;
+}
+
+function renderBoard() {
+  const b = $('board');
+  b.textContent = '';
+  const list = tasks.filter((t) => {
+    if (filter && t.assignee !== filter) return false;
+    if (query && t.title.toLowerCase().indexOf(query) < 0 && t.desc.toLowerCase().indexOf(query) < 0) return false;
+    return true;
+  });
+  const emptyText = !loaded ? 'იტვირთება…' : (filter || query) ? 'ვერაფერი მოიძებნა' : 'ცარიელია';
+
+  STATUSES.forEach((s) => {
+    const items = list.filter((t) => t.status === s.id).sort((a, z) => {
+      const pa = PRANK[a.priority], pz = PRANK[z.priority];
+      if (pa !== pz) return pa - pz;
+      if (s.id !== 'done' && a.due !== z.due) {
+        if (!a.due) return 1;
+        if (!z.due) return -1;
+        return a.due < z.due ? -1 : 1;
+      }
+      return a.createdAt - z.createdAt;
+    });
+    const col = el('section', 'col');
+    col.setAttribute('aria-label', s.label);
+    const head = el('header', 'col-head');
+    const dot = el('span', 'dot');
+    dot.style.background = 'var(--s-' + s.id + ')';
+    head.appendChild(dot);
+    head.appendChild(el('h3', null, s.label));
+    head.appendChild(el('span', 'n', String(items.length)));
+    col.appendChild(head);
+
+    const body = el('div', 'col-body');
+    items.forEach((t) => body.appendChild(card(t)));
+    if (!items.length) body.appendChild(el('p', 'empty', emptyText));
+    col.appendChild(body);
+
+    col.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      col.classList.add('over');
+    });
+    col.addEventListener('dragleave', (e) => {
+      if (!col.contains(e.relatedTarget)) col.classList.remove('over');
+    });
+    col.addEventListener('drop', (e) => {
+      e.preventDefault();
+      col.classList.remove('over');
+      const id = e.dataTransfer.getData('text/plain');
+      if (id) setStatus(id, s.id);
+    });
+    b.appendChild(col);
+  });
+}
+
+function render() {
+  renderStats();
+  renderFilters();
+  renderBoard();
+  $('hint').hidden = !(loaded && tasks.length === 0);
+}
+
+/* ---------- data subscription ---------- */
+function subscribe(user) {
+  if (unsub) unsub();
+  loaded = false;
+  tasks = [];
+  showApp();
+  render();
+  tasksCol = collection(fs, 'tasks');
+  unsub = onSnapshot(tasksCol, { includeMetadataChanges: true }, (snap) => {
+    tasks = snap.docs.map((d) => normalize(d.id, d.data()));
+    if (editingId && !byId(editingId) && !snap.metadata.fromCache) {
+      resetForm();
+      flashError('ტასკი, რომელსაც ცვლიდი, სხვამ წაშალა.');
+    }
+    if (!snap.metadata.fromCache) loaded = true;
+    render();
+  }, (err) => {
+    unsub = null;
+    tasksCol = null;
+    if (err && err.code === 'permission-denied') {
+      showGate('წვდომა არ გაქვს',
+        'ანგარიში ' + (user.email || '') + ' ამ დაფის სიაში არ არის. სთხოვე დაფის მფლობელს, რომ ეს email დაამატოს Firestore-ის წესებში, ან შედი სხვა ანგარიშით.',
+        { signOut: true });
+    } else {
+      showGate('ტასკები ვერ ჩაიტვირთა', 'შეამოწმე ინტერნეტი და განაახლე გვერდი. (' + (err && err.code || 'unknown') + ')', { signOut: true });
+    }
+  });
+}
+
+/* ---------- auth ---------- */
+async function doSignIn() {
+  const provider = new GoogleAuthProvider();
+  provider.setCustomParameters({ prompt: 'select_account' });
+  try {
+    await signInWithPopup(auth, provider);
+  } catch (e) {
+    const c = e && e.code;
+    if (c === 'auth/popup-blocked' || c === 'auth/operation-not-supported-in-this-environment') {
+      flashError('ბრაუზერმა შესვლის ფანჯარა დაბლოკა. მისამართის ზოლში დაუშვი pop-up-ები ამ საიტისთვის და ისევ დააჭირე „Google-ით შესვლა“.');
+      return;
+    }
+    if (c === 'auth/popup-closed-by-user' || c === 'auth/cancelled-popup-request') return;
+    if (c === 'auth/unauthorized-domain') {
+      flashError('ეს მისამართი (' + location.hostname + ') Firebase-ში ნებადართული არ არის. დაამატე Authentication → Settings → Authorized domains-ში.');
+      return;
+    }
+    flashError('შესვლა ვერ მოხერხდა (' + (c || 'unknown') + '). სცადე თავიდან.');
+  }
+}
+async function doSignOut() {
+  if (unsub) { unsub(); unsub = null; }
+  tasksCol = null;
+  resetForm();
+  await signOut(auth);
+}
+$('signIn').addEventListener('click', doSignIn);
+$('signOut').addEventListener('click', doSignOut);
+$('gateOut').addEventListener('click', async () => { await doSignOut(); doSignIn(); });
+
+/* ---------- start ---------- */
+fillStatusOptions();
+render();
+
+if (location.protocol === 'file:') {
+  showGate('გვერდი ფაილიდანაა გახსნილი',
+    'Google-ით შესვლა ფაილიდან გახსნილ გვერდზე არ მუშაობს. ატვირთე ეს ფაილი GitHub Pages-ზე (ან სხვა ჰოსტინგზე) და გახსენი ბმულით. ინსტრუქცია README ფაილშია.');
+} else if (FIREBASE_CONFIG.apiKey.indexOf('PASTE_') === 0) {
+  showGate('Firebase ჯერ არ არის მიერთებული',
+    'index.html ფაილში, FIREBASE_CONFIG ბლოკში, ჩასვი შენი Firebase პროექტის კონფიგურაცია. ინსტრუქცია README ფაილშია.');
+} else {
+  try {
+    const app = initializeApp(FIREBASE_CONFIG);
+    auth = getAuth(app);
+    fs = getFirestore(app);
+    onAuthStateChanged(auth, (user) => {
+      if (!user) {
+        $('account').hidden = true;
+        showGate('შესვლა', 'დაფის სანახავად შედი Google ანგარიშით. წვდომა აქვთ მხოლოდ იმ ადამიანებს, ვისი email-იც დაფის მფლობელმა დაამატა.', { signIn: true });
+        return;
+      }
+      $('me').textContent = user.displayName || user.email || '';
+      $('account').hidden = false;
+      subscribe(user);
+    });
+  } catch (e) {
+    showGate('Firebase ვერ ჩაირთო', 'შეამოწმე FIREBASE_CONFIG ბლოკი index.html-ში. (' + (e && e.message || e) + ')');
+  }
+}
+</script>
+</body>
+</html>
