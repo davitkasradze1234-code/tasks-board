@@ -119,6 +119,22 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .btn.small { padding: 4px 10px; font-size: 12px; }
 .btn:disabled { opacity: .5; cursor: not-allowed; }
 
+/* members */
+.mhead { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.minvite { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) auto; gap: 10px; align-items: end; }
+.minvite label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); min-width: 0; }
+.minvite input, .minvite select { width: 100%; min-width: 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--ink); font-size: 14px; }
+.mhint { font-size: 13px; color: var(--muted); overflow-wrap: anywhere; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.mhint.err { color: var(--danger); }
+.mhint a { color: var(--accent); }
+.mlist { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.mlist li { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 8px 0; border-top: 1px solid var(--line); }
+.mlist .mwho { flex: 1 1 200px; min-width: 0; overflow-wrap: anywhere; }
+.mlist .mwho small { display: block; color: var(--muted); font-size: 12px; }
+.st-joined { color: var(--s-done); }
+.st-invited { color: var(--warn); }
+.p-admin { color: var(--accent); }
+
 /* filters */
 .tools { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; }
 .search { flex: 0 1 260px; min-width: 0; padding: 6px 10px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); color: var(--ink); font-size: 13px; }
@@ -172,6 +188,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
   .board { grid-template-columns: 1fr; overflow: visible; }
   .fields .wide { grid-column: auto; }
   .search { flex: 1 1 100%; }
+  .minvite { grid-template-columns: 1fr; }
   .mini { padding: 6px 10px; }
 }
 @media (prefers-reduced-motion: no-preference) {
@@ -185,11 +202,33 @@ button, input, select, textarea { font: inherit; color: inherit; }
     <h1>ტასკების დაფა</h1>
     <div class="account" id="account" hidden>
       <span class="who-me" id="me"></span>
+      <button class="btn small" type="button" id="openMembers" aria-expanded="false" aria-controls="membersPanel">წევრები</button>
       <button class="btn small" type="button" id="signOut">გასვლა</button>
     </div>
   </header>
 
   <p class="note" id="note" role="status" hidden></p>
+
+  <section class="panel" id="membersPanel" aria-labelledby="mTitle" hidden>
+    <div class="mhead">
+      <h2 id="mTitle">წევრები</h2>
+      <button class="btn small" type="button" id="closeMembers">დახურვა</button>
+    </div>
+    <form class="minvite" id="mForm" autocomplete="off">
+      <label for="mEmail">Google email
+        <input id="mEmail" type="email" required maxlength="120" placeholder="name@gmail.com">
+      </label>
+      <label for="mRole">როლი
+        <select id="mRole">
+          <option value="member">წევრი</option>
+          <option value="admin">ადმინისტრატორი</option>
+        </select>
+      </label>
+      <button class="btn primary" type="submit" id="mSubmit">დამატება და მოწვევა</button>
+    </form>
+    <div class="mhint" id="mHint" role="status"></div>
+    <ul class="mlist" id="mList"></ul>
+  </section>
 
   <!-- shown until the person is signed in and allowed -->
   <section class="gate" id="gate">
@@ -277,13 +316,17 @@ const FIREBASE_CONFIG = {
   messagingSenderId: "544085577034",
   appId: "1:544085577034:web:84bef8a7ff915730a505b3"
 };
+// დაფის მფლობელი: ყოველთვის ადმინისტრატორია და მისი წაშლა შეუძლებელია (იგივე უნდა იყოს firestore.rules-ში).
+const OWNER_EMAIL = "davitkasradze1234@gmail.com";
+// Google Apps Script-ის ბმული, რომელიც მოწვევის წერილს აგზავნის (invite-mailer.gs).
+const INVITE_URL = "https://script.google.com/macros/s/AKfycbwLo3B7rQAFSxQU7WPioytP0Npqf0EjxqX-3QVWMzV5DAZVwRlJgaXh_n7wzhduaznx_g/exec";
 
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import {
   getAuth, GoogleAuthProvider, onAuthStateChanged, signInWithPopup, signOut
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import {
-  getFirestore, collection, doc, addDoc, updateDoc, deleteDoc, onSnapshot
+  getFirestore, collection, doc, addDoc, setDoc, updateDoc, deleteDoc, onSnapshot
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 const STATUSES = [
@@ -304,6 +347,9 @@ let loaded = false;
 let filter = '', query = '', editingId = null, editOrig = null, confirmDel = null;
 let noteTimer = null;
 const chains = {};
+let members = [], me = null, amAdmin = false, unsubMembers = null, selfSynced = false, confirmMember = null;
+const BOARD_URL = location.origin + location.pathname;
+const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 
 const $ = (id) => document.getElementById(id);
 function el(tag, cls, text) {
@@ -529,7 +575,9 @@ function renderFilters() {
   if (filter && names.indexOf(filter) < 0) filter = '';
   const dl = $('whoList');
   dl.textContent = '';
-  names.forEach((n) => { const o = el('option'); o.value = n; dl.appendChild(o); });
+  const suggest = names.slice();
+  members.forEach((m) => { const n = m.name || m.email; if (suggest.indexOf(n) < 0) suggest.push(n); });
+  suggest.forEach((n) => { const o = el('option'); o.value = n; dl.appendChild(o); });
 
   const box = $('filters');
   box.textContent = '';
@@ -668,13 +716,159 @@ function render() {
   $('hint').hidden = !(loaded && tasks.length === 0);
 }
 
+/* ---------- members ---------- */
+function normMember(id, o) {
+  o = o || {};
+  return {
+    email: id,
+    role: o.role === 'admin' ? 'admin' : 'member',
+    name: str(o.name).slice(0, 80),
+    invitedBy: str(o.invitedBy),
+    invitedAt: typeof o.invitedAt === 'number' ? o.invitedAt : 0,
+    lastSeen: typeof o.lastSeen === 'number' ? o.lastSeen : 0
+  };
+}
+function myEmail() { return me && me.email ? me.email.toLowerCase() : ''; }
+function computeAdmin() {
+  const mine = members.find((m) => m.email === myEmail());
+  amAdmin = myEmail() === OWNER_EMAIL || !!(mine && mine.role === 'admin');
+}
+function setHint(parts, isErr) {
+  const h = $('mHint');
+  h.textContent = '';
+  h.classList.toggle('err', !!isErr);
+  (Array.isArray(parts) ? parts : [parts]).forEach((p) => h.appendChild(typeof p === 'string' ? document.createTextNode(p) : p));
+}
+function inviteText(em) {
+  return 'გამარჯობა! დაგამატე ჩვენს ტასკების დაფაზე. გახსენი ბმული და შედი Google ანგარიშით (' + em + '): ' + BOARD_URL;
+}
+function showManualInvite(em) {
+  const link = el('a', null, BOARD_URL);
+  link.href = BOARD_URL;
+  link.target = '_blank';
+  link.rel = 'noopener';
+  const copy = el('button', 'btn small', 'ტექსტის კოპირება');
+  copy.type = 'button';
+  copy.addEventListener('click', () => {
+    navigator.clipboard.writeText(inviteText(em)).then(() => { copy.textContent = 'დაკოპირდა'; }, () => { copy.textContent = 'ვერ დაკოპირდა'; });
+  });
+  setHint(['ავტომატური წერილი ვერ გაიგზავნა. ' + em + ' დაემატა, ბმული თავად გაუგზავნე: ', link, copy], true);
+}
+async function sendInvite(em) {
+  if (INVITE_URL.indexOf('PASTE_') === 0) { showManualInvite(em); return; }
+  setHint('მოწვევის წერილს ვაგზავნი: ' + em + '…');
+  try {
+    const idToken = await auth.currentUser.getIdToken();
+    const r = await fetch(INVITE_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ idToken, email: em, inviterName: (me && me.displayName) || '', boardUrl: BOARD_URL })
+    });
+    const j = await r.json();
+    if (!j.ok) throw new Error(j.error || 'failed');
+    setHint('მოწვევის წერილი გაეგზავნა: ' + em + '. შესვლის შემდეგ სიაში „შემოსულია“ გამოჩნდება.');
+  } catch (e) {
+    showManualInvite(em);
+  }
+}
+async function addMember(e) {
+  e.preventDefault();
+  if (!amAdmin) return;
+  const em = $('mEmail').value.trim().toLowerCase();
+  const role = $('mRole').value === 'admin' ? 'admin' : 'member';
+  if (!EMAIL_RE.test(em)) { setHint('ჩაწერე სწორი email მისამართი.', true); return; }
+  if (members.some((m) => m.email === em)) { setHint(em + ' უკვე წევრია. მოწვევის ხელახლა გასაგზავნად გამოიყენე ღილაკი სიაში.', true); return; }
+  $('mSubmit').disabled = true;
+  try {
+    await setDoc(doc(fs, 'members', em), { email: em, role, name: '', invitedBy: myEmail(), invitedAt: Date.now() });
+    $('mForm').reset();
+    await sendInvite(em);
+  } catch (err) {
+    setHint('წევრი ვერ დაემატა. ' + errText(err), true);
+  } finally {
+    $('mSubmit').disabled = false;
+  }
+}
+function removeMember(em) {
+  confirmMember = null;
+  run('m:' + em, () => deleteDoc(doc(fs, 'members', em)));
+  renderMembers();
+}
+function setRole(em, role) {
+  run('m:' + em, () => updateDoc(doc(fs, 'members', em), { role }));
+}
+function renderMembers() {
+  computeAdmin();
+  $('mForm').hidden = !amAdmin;
+  const list = $('mList');
+  list.textContent = '';
+  const sorted = members.slice().sort((a, b) => {
+    if ((a.email === OWNER_EMAIL) !== (b.email === OWNER_EMAIL)) return a.email === OWNER_EMAIL ? -1 : 1;
+    return a.invitedAt - b.invitedAt;
+  });
+  sorted.forEach((m) => {
+    const li = el('li');
+    const who = el('span', 'mwho', m.name || m.email);
+    if (m.name) who.appendChild(el('small', null, m.email));
+    li.appendChild(who);
+    const isOwnerRow = m.email === OWNER_EMAIL;
+    li.appendChild(el('span', 'pill ' + (m.role === 'admin' ? 'p-admin' : 'p-low'), isOwnerRow ? 'მფლობელი' : m.role === 'admin' ? 'ადმინისტრატორი' : 'წევრი'));
+    li.appendChild(el('span', m.lastSeen ? 'st-joined' : 'st-invited', m.lastSeen ? 'შემოსულია' : 'მოწვეულია'));
+    if (amAdmin && !isOwnerRow && m.email !== myEmail()) {
+      if (confirmMember === m.email) {
+        li.appendChild(el('span', 'ask', 'წაშლა?'));
+        li.appendChild(mini('დიახ', 'წევრის წაშლა', () => removeMember(m.email), false, 'danger'));
+        li.appendChild(mini('არა', 'გაუქმება', () => { confirmMember = null; renderMembers(); }, false));
+      } else {
+        if (!m.lastSeen) li.appendChild(mini('ხელახლა გაგზავნა', 'მოწვევის ხელახლა გაგზავნა', () => sendInvite(m.email), false));
+        li.appendChild(mini(m.role === 'admin' ? 'წევრად გადაყვანა' : 'ადმინად დანიშვნა', 'როლის შეცვლა', () => setRole(m.email, m.role === 'admin' ? 'member' : 'admin'), false));
+        li.appendChild(mini('წაშლა', 'წევრის წაშლა', () => { confirmMember = m.email; renderMembers(); }, false, 'danger'));
+      }
+    }
+    list.appendChild(li);
+  });
+  if (!sorted.length) list.appendChild(el('li', 'empty', 'იტვირთება…'));
+}
+function syncSelf() {
+  // record that this person has signed in (and their display name) once per session
+  if (selfSynced || !me) return;
+  const em = myEmail();
+  const mine = members.find((m) => m.email === em);
+  const name = (me.displayName || '').slice(0, 80);
+  if (mine) {
+    selfSynced = true;
+    updateDoc(doc(fs, 'members', em), { name, lastSeen: Date.now() }).catch(() => {});
+  } else if (em === OWNER_EMAIL) {
+    selfSynced = true;
+    setDoc(doc(fs, 'members', em), { email: em, role: 'admin', name, invitedBy: em, invitedAt: Date.now(), lastSeen: Date.now() }).catch(() => {});
+  }
+}
+function toggleMembers(open) {
+  $('membersPanel').hidden = !open;
+  $('openMembers').setAttribute('aria-expanded', open ? 'true' : 'false');
+  if (open) renderMembers();
+}
+$('openMembers').addEventListener('click', () => toggleMembers($('membersPanel').hidden));
+$('closeMembers').addEventListener('click', () => toggleMembers(false));
+$('mForm').addEventListener('submit', addMember);
+
 /* ---------- data subscription ---------- */
 function subscribe(user) {
   if (unsub) unsub();
+  if (unsubMembers) unsubMembers();
   loaded = false;
   tasks = [];
+  members = [];
+  me = user;
+  selfSynced = false;
   showApp();
   render();
+  unsubMembers = onSnapshot(collection(fs, 'members'), (snap) => {
+    members = snap.docs.map((d) => normMember(d.id, d.data()));
+    syncSelf();
+    renderMembers();
+    renderFilters();
+  }, () => { unsubMembers = null; });
   tasksCol = collection(fs, 'tasks');
   unsub = onSnapshot(tasksCol, { includeMetadataChanges: true }, (snap) => {
     tasks = snap.docs.map((d) => normalize(d.id, d.data()));
@@ -688,8 +882,9 @@ function subscribe(user) {
     unsub = null;
     tasksCol = null;
     if (err && err.code === 'permission-denied') {
+      $('membersPanel').hidden = true;
       showGate('წვდომა არ გაქვს',
-        'ანგარიში ' + (user.email || '') + ' ამ დაფის სიაში არ არის. სთხოვე დაფის მფლობელს, რომ ეს email დაამატოს Firestore-ის წესებში, ან შედი სხვა ანგარიშით.',
+        'ანგარიში ' + (user.email || '') + ' ამ დაფის წევრებში არ არის. სთხოვე დაფის ადმინისტრატორს, რომ ეს email დაგამატოს „წევრები“ განყოფილებაში, ან შედი სხვა ანგარიშით.',
         { signOut: true });
     } else {
       showGate('ტასკები ვერ ჩაიტვირთა', 'შეამოწმე ინტერნეტი და განაახლე გვერდი. (' + (err && err.code || 'unknown') + ')', { signOut: true });
@@ -719,6 +914,10 @@ async function doSignIn() {
 }
 async function doSignOut() {
   if (unsub) { unsub(); unsub = null; }
+  if (unsubMembers) { unsubMembers(); unsubMembers = null; }
+  members = [];
+  me = null;
+  $('membersPanel').hidden = true;
   tasksCol = null;
   resetForm();
   await signOut(auth);
@@ -745,7 +944,8 @@ if (location.protocol === 'file:') {
     onAuthStateChanged(auth, (user) => {
       if (!user) {
         $('account').hidden = true;
-        showGate('შესვლა', 'დაფის სანახავად შედი Google ანგარიშით. წვდომა აქვთ მხოლოდ იმ ადამიანებს, ვისი email-იც დაფის მფლობელმა დაამატა.', { signIn: true });
+        $('membersPanel').hidden = true;
+        showGate('შესვლა', 'დაფის სანახავად შედი Google ანგარიშით. თუ მოწვევის წერილი მიიღე, შედი იმავე email-ის ანგარიშით. წვდომა აქვთ მხოლოდ დაფის წევრებს.', { signIn: true });
         return;
       }
       $('me').textContent = user.displayName || user.email || '';
